@@ -214,7 +214,11 @@ def safe_suffix(value):
 
 
 def app_arguments(image, name, network, volume):
+    # Primary attachment is the internal browser/fixture network; the egress
+    # bridge exists only so Docker will actually publish the loopback ports
+    # (containers on internal-only networks silently lose published ports).
     args = ['run', '-d', '--pull=never', '--name', name, '--network', network,
+            '--network-alias', 'app',
             '--init', '--shm-size=512m', '-p', '127.0.0.1::9377',
             '-p', '127.0.0.1::6080', '--mount', f'type=volume,src={volume},dst=/state']
     for key in SECRET_NAMES:
@@ -339,6 +343,9 @@ class Acceptance:
 
     def start_app(self):
         self.docker(*app_arguments(self.image, self.app, self.network, self.volume))
+        # Second, non-internal attachment publishes the loopback ports;
+        # internal-only containers never publish on Docker 28+ (moby#53256).
+        self.docker('network', 'connect', self.network + '-egress', self.app)
         self.ports()
         self.wait('public health', lambda: http_request(self.port, 'GET', '/health'))
         # Upstream versions use either global 401 or per-route 403; both deny access.
@@ -446,7 +453,15 @@ class Acceptance:
         try:
             self.docker('image', 'inspect', self.image)  # Refuse missing local images; no pulls.
             self.reserve('network', self.network)
+            # GitHub runners run Docker 28/29, where containers attached only to
+            # an `--internal` network silently lose published ports (moby#53256):
+            # the loopback-bound API/noVNC ports would never appear. Create an
+            # internal network for the browser/fixture traffic plus a normal
+            # egress bridge so the app's published loopback ports actually bind.
+            # The app reaches the fixture over the internal network only; the
+            # second attachment is for port publication, not browser egress.
             self.docker('network', 'create', '--internal', self.network)
+            self.docker('network', 'create', self.network + '-egress')
             self.reserve('volume', self.volume)
             self.docker('volume', 'create', self.volume)
             self.reserve('container', self.fixture)

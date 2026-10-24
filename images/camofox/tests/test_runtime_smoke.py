@@ -126,6 +126,9 @@ class SafetyTests(unittest.TestCase):
         self.assertIn('CAMOFOX_API_KEY', args)
         self.assertFalse(any('CAMOFOX_API_KEY=' in arg for arg in args))
         self.assertEqual(args[-1], 'image:test')
+        # The egress attachment is a runtime 'network connect' after creation,
+        # because Docker 28+ never publishes ports on internal-only containers.
+        self.assertNotIn('ci-net-egress', args)
 
     def test_port_bindings_require_loopback_and_unambiguous_port(self):
         m = load()
