@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import unittest
 
 PATH = Path(__file__).with_name('runtime_smoke.py')
@@ -125,6 +126,41 @@ class SafetyTests(unittest.TestCase):
         self.assertIn('CAMOFOX_API_KEY', args)
         self.assertFalse(any('CAMOFOX_API_KEY=' in arg for arg in args))
         self.assertEqual(args[-1], 'image:test')
+
+    def test_port_bindings_require_loopback_and_unambiguous_port(self):
+        m = load()
+        self.assertTrue(hasattr(m.Acceptance, 'ports'), 'port validator missing')
+
+        def run_ports(payload):
+            driver = m.Acceptance('image:test', 'ci')
+            driver.docker = lambda *args, **kwargs: subprocess.CompletedProcess(
+                ['docker'], 0, stdout=payload, stderr='')
+            driver.ports()
+            return driver
+
+        dual = json.dumps({
+            '9377/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3911'},
+                         {'HostIp': '::1', 'HostPort': '3911'}],
+            '6080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3980'}]})
+        driver = run_ports(dual)
+        self.assertEqual(driver.port, 3911)
+        self.assertEqual(driver.vnc_port, 3980)
+        loopback_only = json.dumps({
+            '9377/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '3911'}],
+            '6080/tcp': [{'HostIp': '::1', 'HostPort': '3980'}]})
+        run_ports(loopback_only)
+        for bad in ([{'HostIp': '0.0.0.0', 'HostPort': '1'}],
+                    [{'HostIp': '::', 'HostPort': '1'}],
+                    [{'HostIp': '192.168.1.5', 'HostPort': '1'}],
+                    [{'HostIp': '127.0.0.1', 'HostPort': '1'},
+                     {'HostIp': '127.0.0.1', 'HostPort': '2'}]):
+            payload = json.dumps({'9377/tcp': bad,
+                                  '6080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '2'}]})
+            with self.assertRaises(m.SmokeFailure):
+                run_ports(payload)
+        with self.assertRaises((m.SmokeFailure, ValueError, KeyError, TypeError)):
+            run_ports(json.dumps({'9377/tcp': None,
+                                  '6080/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '2'}]}))
 
     def test_container_state_and_redaction_fail_closed(self):
         m = load()

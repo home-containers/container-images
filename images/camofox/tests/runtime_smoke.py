@@ -9,6 +9,7 @@ import base64
 import hashlib
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -319,11 +320,20 @@ class Acceptance:
         bindings = json.loads(self.docker('inspect', '--format',
                                          '{{json .NetworkSettings.Ports}}', self.app).stdout)
         for target in ('9377/tcp', '6080/tcp'):
-            require(len(bindings.get(target) or []) == 1 and
-                    bindings[target][0]['HostIp'] == '127.0.0.1',
+            entries = bindings.get(target) or []
+            # Newer Docker daemons can report one binding per address family.
+            # Every entry must be loopback (IPv4 127.0.0.0/8 or IPv6 ::1) with
+            # a usable port; wildcard or LAN addresses are rejected.
+            require(bool(entries) and
+                    all(ipaddress.ip_address(entry['HostIp']).is_loopback
+                        for entry in entries),
                     'published port is not exclusively loopback')
-        self.port = int(bindings['9377/tcp'][0]['HostPort'])
-        self.vnc_port = int(bindings['6080/tcp'][0]['HostPort'])
+            ports = {int(entry['HostPort']) for entry in entries}
+            require(len(ports) == 1, 'published port is ambiguous across bindings')
+            if target == '9377/tcp':
+                self.port = ports.pop()
+            else:
+                self.vnc_port = ports.pop()
 
     def start_app(self):
         self.docker(*app_arguments(self.image, self.app, self.network, self.volume))
