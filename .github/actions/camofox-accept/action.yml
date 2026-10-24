@@ -1,0 +1,69 @@
+name: Accept native Camofox security overlay
+description: Identical fail-closed acceptance for verification and publication
+runs:
+  using: composite
+  steps:
+    - name: Test all Camofox helper logic without containers
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -I -m unittest discover -s images/camofox/tests -p 'test_*.py' -v
+
+    - name: Snapshot shipped upstream application and dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker run --rm -i --network none --entrypoint /usr/bin/python3 \
+          "$BASE_PIN" -B -I -S - --snapshot-only \
+          < images/camofox/build_overlay.py > "$RUNNER_TEMP/camofox-upstream.json"
+
+    - name: Build security overlay from immutable inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker build --pull --no-cache --progress=plain \
+          --build-arg BASE_IMAGE="$BASE_PIN" \
+          --build-arg NODE_IMAGE="$NODE_PIN" \
+          --label org.opencontainers.image.source=https://github.com/home-containers/container-images \
+          --label org.opencontainers.image.revision="$GITHUB_SHA" \
+          --tag "$TEST_IMAGE" images/camofox
+
+    - name: Compare shipped upstream and derived inventories
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker run --rm -i --network none --entrypoint /usr/bin/python3 \
+          "$TEST_IMAGE" -B -I -S - --snapshot-only \
+          < images/camofox/build_overlay.py > "$RUNNER_TEMP/camofox-derived.json"
+        python3 -I images/camofox/build_overlay.py --compare-snapshots \
+          "$RUNNER_TEMP/camofox-upstream.json" "$RUNNER_TEMP/camofox-derived.json"
+
+    - name: Confirm exact inherited startup contract
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -I - <<'PY'
+        import json, os, subprocess
+        def image(name):
+            return json.loads(subprocess.check_output(["docker", "image", "inspect", name]))[0]
+        base, derived = image(os.environ["BASE_PIN"]), image(os.environ["TEST_IMAGE"])
+        if base["Architecture"] != derived["Architecture"]:
+            raise SystemExit("Architecture changed")
+        for field in ("Entrypoint", "Cmd", "User", "WorkingDir", "Volumes", "Env", "ExposedPorts"):
+            if base["Config"].get(field) != derived["Config"].get(field):
+                raise SystemExit(f"Inherited startup contract changed: {field}")
+        print("Architecture and exact inherited startup contract: passed")
+        PY
+
+    - name: Verify patched libraries without networking
+      shell: bash
+      run: |
+        set -euo pipefail
+        docker run --rm --network none --entrypoint /usr/bin/python3 \
+          "$TEST_IMAGE" -B -I /usr/local/share/camofox-overlay/verify_image.py
+
+    - name: Exercise authenticated browser and persistent runtime contracts
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 images/camofox/tests/runtime_smoke.py --image "$TEST_IMAGE"

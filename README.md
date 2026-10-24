@@ -6,7 +6,7 @@ The goal is to ship targeted dependency fixes without maintaining application fo
 
 ## Status
 
-The public design and policies are established. Hermes has a Dockerfile, lock-coherent security override, tests and **manual-only GitHub-hosted verification and publication workflows**. The publisher tests each native architecture, reads back the pushed images and assembles `ghcr.io/home-containers/hermes:stable` only after both succeed. Check actual Actions and registry results before treating a revision as published. Camofox and Plex remain design-only targets. No scheduled builds or production deployment is configured.
+The public design and policies are established. Hermes has a Dockerfile, lock-coherent security override, tests and **manual-only GitHub-hosted verification and publication workflows**. The publisher tests each native architecture, reads back the pushed images and assembles `ghcr.io/home-containers/hermes:stable` only after both succeed. Camofox adds a separate upstream-`latest` thin overlay with shared native acceptance and separate manual verification/publication. Check actual Actions and registry results before treating a revision as tested or published. Plex remains design-only. No scheduled builds or production deployment is configured.
 
 ## Recommended approach
 
@@ -39,7 +39,7 @@ docs/
   override-policy.md    # how to override dependencies safely
 ```
 
-Hermes includes its recipe, override helper and executable tests; its verification workflow runs only on GitHub-hosted runners. The `image.yaml` schema and shared tooling shown above remain a proposed extension. Camofox and Plex currently have README guidance only. There are no placeholder Dockerfiles that silently publish an unchanged vulnerable base.
+Hermes and Camofox include recipes, override helpers and executable tests; verification runs only on GitHub-hosted runners. The `image.yaml` schema and general shared tooling shown above remain a proposed extension. Plex currently has README guidance only. There are no placeholder Dockerfiles that silently publish an unchanged vulnerable base.
 
 ## Update layers independently
 
@@ -55,7 +55,7 @@ Hermes includes its recipe, override helper and executable tests; its verificati
 ## Defaults
 
 - Public source repository; never include runtime profiles, private configuration, media, login state or credentials.
-- Release-based upstream pins; no automatic production tracking of application `main` branches.
+- Published upstream bases, resolved to digests in CI. Prefer release tags unless explicitly requested otherwise (Camofox uses upstream `latest`); never rebuild application `main` as a substitute.
 - Independent image versions and platform lists; start only with architectures actually needed and supported.
 - Prefer the fixed upstream image over a custom override whenever it meets the same tests.
 - Targeted changes first. A broader distro-package refresh is allowed only after an image-specific review and regression tests.

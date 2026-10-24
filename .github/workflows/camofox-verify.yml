@@ -1,0 +1,52 @@
+name: Verify Camofox security overlay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve immutable upstream and Node inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base_pin: ${{ steps.inputs.outputs.base_pin }}
+      node_pin: ${{ steps.inputs.outputs.node_pin }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Resolve both registry indexes once per run
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I .github/scripts/resolve_camofox_inputs.py
+
+  native:
+    name: Native acceptance (${{ matrix.arch }})
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      BASE_PIN: ${{ needs.resolve.outputs.base_pin }}
+      NODE_PIN: ${{ needs.resolve.outputs.node_pin }}
+      TEST_IMAGE: camofox-security-overlay:ci
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Accept the native image
+        uses: ./.github/actions/camofox-accept

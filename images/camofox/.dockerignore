@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!build_overlay.py
+!policy.json
+!tests/
+!tests/verify_image.py
