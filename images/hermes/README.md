@@ -1,27 +1,77 @@
-# Hermes image
+# Hermes security overlay
 
-Status: proposed target; no Dockerfile, build or patched image is enabled yet.
+Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Dockerfile, lock-coherent override helper, read-only image checks and a manual GitHub Actions verification workflow are implemented. Consult the actual Actions run before treating a revision as verified. No GHCR publication or production deployment is configured.
 
-## Source and ownership
+## What changes
 
-Use a verified stable release of the publisher's `nousresearch/hermes-agent` image, pinned by digest. Do not follow the application development branch automatically.
+1. Verify that the base is Debian 13 (`trixie`), the distribution used by the reviewed stable image.
+2. Run `apt-get update` and noninteractive `apt-get upgrade --with-new-pkgs`. This allows new dependency packages but is not a distribution upgrade and does not authorize package removals.
+3. Ensure `libbrotli1` includes Debian's security backport, at least **`1.1.0-2+deb13u1`**. Verify both its Debian package version and the decoder's new error marker.
+4. Change the selected application dependency to **`brotlicffi==1.2.1.0`**, the fixed Python release for CVE-2026-111497. Do not downgrade a newer upstream pin.
+5. Refresh `uv.lock` through Hermes PM, rejecting unrelated package-entry changes. The root project's own changed dependency metadata is expected.
+6. Rebuild the upstream image's recorded extras through PM, refresh its dependency-selection stamp and reassemble the existing application/launchers using the upstream image assembler. No core Python source or frontend application code is patched.
+7. Verify the fixed Python and native decoders, HTTPX decoding, Node's patch marker and PM lock consistency.
 
-The initial design is an image overlay, not a fork of Hermes core. Keep persistent runtime profiles and credentials out of the build context.
+### The release-age policy
 
-## Special considerations
+Upstream's dependency resolver normally requires releases to be three days old. The October 22 Brotli security release was younger than that when this overlay was prepared on October 24. The overlay adds **only `brotlicffi = false`** to the package-specific age exceptions, alongside upstream's existing certifi exception. The global three-day gate stays enabled, the Brotli version is exact, and the resolved artifacts remain hash-locked. This is a deliberate downstream exception for the reviewed security fix, not a blanket freshness-policy bypass.
 
-- Hermes has its own Python environment and dependency-management/startup behavior. Inspect the selected release before deciding how an override is installed.
-- Updating a distro shared library does not necessarily update a Python Brotli wheel.
-- Verify that normal startup and dependency synchronization preserve the selected fix. A successful one-off installer invocation is not acceptance.
-- Inspect all Node executable copies as well as the Python environment and distro libraries; a fixed main Node binary does not clear the rest of the image.
-- Preserve the publisher's initialization and privilege-drop contract rather than bypassing its entrypoint.
+## Python: update security patches, not the minor version blindly
 
-## Required tests
+APT refreshes Debian's separate system Python. It does not replace Hermes's PM-managed interpreter.
 
-- CLI/version invocation and the normal startup path with disposable state.
-- Dependency inventory and targeted advisory regression/patch checks.
-- No environment repair or synchronization silently restores a vulnerable pin.
-- Expected runtime UID, state-volume writes, health and clean shutdown.
-- No messaging credentials or production provider calls in CI. A live Slack reconnect is a deployment acceptance check, not something a clean image CI run can claim.
+The reviewed stable image already contains **CPython 3.14.9**, released October 21, 2026 as an expedited security release. It is the current patch release in the supported 3.14 series as of October 24. Python 3.15.1 also exists, but changing the application to a new minor series is not required for this fix and would change native-wheel/ABI compatibility.
 
-Reference: [Hermes Docker documentation](https://hermes-agent.nousresearch.com/docs/user-guide/docker).
+This overlay retains the managed interpreter and enforces a **3.14.9 minimum**. An older base fails closed; it does not silently swap in an incompatible distro interpreter. Revisit the minimum and PM runtime artifacts when a later 3.14 security release is available. No claim is made that this static minimum automatically tracks future advisories.
+
+**Latest is not vulnerability-free.** CPython's open [issue #160040](https://github.com/python/cpython/issues/160040) tracks additional compromised-intermediate-key distrust. No newer released 3.14 patch was found on October 24, and switching to 3.15.1 is not an evidenced fix. Certificate-store updates and the exact verified TLS chain matter; this does not establish that every described platform-specific scenario affects this Debian image. The reviewed base already pins `certifi==2026.10.19` and PM uv 0.13.5; the interpreter version alone would not prove those trust-store/tool updates. This overlay is not a clearance of the outstanding TLS issue.
+
+## What stays upstream-owned
+
+- s6 entrypoint, command routing, root initialization and the subsequent privilege drop.
+- The existing Python runtime/tool-artifact lock, Node runtime and frontend bundles.
+- Persistent profile/configuration ownership and the `/opt/data` volume contract.
+
+The Python dependency manifest and lock deliberately diverge for the security override. The original copies, their lock hash and the derived build report are retained under `/usr/local/share/hermes-overlay/`; the APT inventory is there as `dpkg-packages.tsv`.
+
+## Build inputs
+
+- `BASE_IMAGE` defaults to `nousresearch/hermes-agent:stable`, as requested.
+- The verification workflow resolves that tag to a digest and passes the immutable reference into the build. A new run may intentionally resolve a newer stable image.
+- `BROTLICFFI_VERSION` defaults to `1.2.1.0`; another exact fixed version requires review. Unsupported upstream manifest layouts, unrelated lock changes and newer pins that would be downgraded fail the build.
+- A closed `.dockerignore` sends only the Dockerfile and required build/check scripts, not runtime state or credentials.
+- Moving Debian repositories mean refreshed APT contents can differ between builds. The captured inventory records what was installed; a base digest alone does not make APT updates reproducible.
+
+## Verification: GitHub-hosted runners only
+
+Do **not** build this image locally or on the production NixOS host. The manual-only workflow `.github/workflows/hermes-verify.yml` uses native ARM64 and AMD64 GitHub-hosted runners and has read-only repository permissions. It does not publish images.
+
+Run from GitHub's Actions tab, or dispatch remotely:
+
+```sh
+gh workflow run hermes-verify.yml --repo home-containers/container-images
+```
+
+It runs:
+
+- Pure manifest-override unit tests.
+- A fresh upstream pull and uncached derived-image build.
+- Startup-metadata/environment inheritance checks.
+- Decoder and PM checks in a network-disabled disposable container.
+- The normal upstream s6 startup with empty tmpfs state, no network and dashboard disabled.
+- Checks that the override survives startup, the CLI runs, UID 10000 can write state, and shutdown does not require SIGKILL.
+
+Tests never mount production profiles, access provider credentials or reconnect the live Slack bot. The checks are targeted regression/patch checks, **not a comprehensive vulnerability scan or clearance of every bundled component**. Existing runtime dependency generations need a separate disposable-state migration test before deployment to an existing installation.
+
+## Size and cache caveat
+
+The original upstream layers remain part of the image. Replacing the environment or deleting an old cached package in a later layer cannot erase bytes from its parent layers. Build tools already present upstream are not removed indiscriminately because PM lazy extras can depend on them. No size reduction or complete removal of historical parent-layer bytes is promised.
+
+## References
+
+- [Upstream Dockerfile on main](https://github.com/NousResearch/hermes-agent/blob/main/Dockerfile) — design reference; the chosen image's bundled source governs that build.
+- [Hermes Docker ownership and dependency model](https://hermes-agent.nousresearch.com/docs/user-guide/docker)
+- [Python 3.14.9 security release](https://www.python.org/downloads/release/python-3149/)
+- [Python release listing](https://www.python.org/downloads/)
+- [Debian Brotli advisory tracking](https://security-tracker.debian.org/tracker/CVE-2026-111497)
+- [Python Brotli advisory](https://github.com/advisories/GHSA-9v8h-qqgm-4m35)

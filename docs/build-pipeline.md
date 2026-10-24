@@ -1,6 +1,6 @@
 # Build, publish and promote
 
-This is the implementation contract, not an enabled workflow. No builds, scheduled jobs, publications or deployments are configured by this initial commit.
+The end-to-end publishing/promotion pipeline below remains an implementation contract. A manual-only Hermes verification workflow now builds and tests on GitHub-hosted ARM64/AMD64 runners; it has no publishing permissions. No scheduled jobs, image publications or deployments are configured.
 
 ## Proposed lifecycle
 

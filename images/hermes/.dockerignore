@@ -1,0 +1,6 @@
+# Closed build context: never send local runtime state or credentials.
+**
+!Dockerfile
+!build_overlay.py
+!tests/
+!tests/verify_image.py

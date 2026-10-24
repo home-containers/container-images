@@ -6,7 +6,7 @@ The goal is to ship targeted dependency fixes without maintaining application fo
 
 ## Status
 
-This repository is the public design and policy foundation. No image build or publishing workflows are enabled yet, and no derived image is advertised as patched or production-ready. Deployment remains a separate, explicitly approved operation.
+The public design and policies are established. Hermes now has a Dockerfile, lock-coherent security override, tests and a **manual-only GitHub-hosted verification workflow**. Check its actual Actions results before treating a revision as verified. Camofox and Plex remain design-only targets. No image publishing, scheduled builds or production deployment is configured.
 
 ## Recommended approach
 
@@ -39,7 +39,7 @@ docs/
   override-policy.md    # how to override dependencies safely
 ```
 
-Only the README files and policies exist initially. Dockerfiles, executable tests, metadata schemas and workflows must be implemented and exercised before a target is enabled. There are no placeholder Dockerfiles that silently publish an unchanged vulnerable base.
+Hermes includes its recipe, override helper and executable tests; its verification workflow runs only on GitHub-hosted runners. The `image.yaml` schema and shared tooling shown above remain a proposed extension. Camofox and Plex currently have README guidance only. There are no placeholder Dockerfiles that silently publish an unchanged vulnerable base.
 
 ## Update layers independently
 
