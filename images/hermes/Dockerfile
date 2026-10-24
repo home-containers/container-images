@@ -36,11 +36,12 @@ COPY --chmod=0644 build_overlay.py tests/verify_image.py /usr/local/share/hermes
 # interpreter: retain its reviewed 3.14.9+ runtime, do not replace it with a
 # mismatched apt interpreter. An older base fails closed and needs a reviewed
 # PM runtime-pin update rather than a blind major/minor Python upgrade.
-# Rebuild the shipped extras through PM so startup/lazy installs cannot restore
-# the vulnerable Brotli pin. A plain pip install over .venv is not sufficient.
+# Replace only the Brotli wheel in the inherited environment. Keep the lock,
+# dependency declaration and PM selection coherent without rebuilding Hermes,
+# frontends, launchers, the interpreter, or the complete virtual environment.
 RUN set -eu; \
     export HERMES_HOME=/var/tmp/hermes-overlay-build-home; \
-    /usr/local/bin/python3 -I -S /usr/local/share/hermes-overlay/build_overlay.py \
+    /usr/local/bin/python3 -B -I -S /usr/local/share/hermes-overlay/build_overlay.py \
         --brotlicffi-version "$BROTLICFFI_VERSION" --base-image "$BASE_IMAGE"; \
     /opt/hermes/.venv/bin/python -I /usr/local/share/hermes-overlay/verify_image.py; \
     rm -rf /var/tmp/hermes-overlay-build-home

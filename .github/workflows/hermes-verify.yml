@@ -49,6 +49,14 @@ jobs:
           printf 'BASE_PIN=%s\n' "$pin" >> "$GITHUB_ENV"
           printf 'Resolved upstream: %s\n' "$pin"
 
+      - name: Snapshot shipped upstream application and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -i --network none --entrypoint /usr/local/bin/python3 \
+            "$BASE_PIN" -B -I -S - --snapshot-only \
+            < images/hermes/build_overlay.py > upstream-inventory.json
+
       - name: Build the Debian and Python security overlay
         shell: bash
         run: |
@@ -56,6 +64,16 @@ jobs:
           docker build --pull --no-cache --progress=plain \
             --build-arg BASE_IMAGE="$BASE_PIN" \
             --tag "$TEST_IMAGE" images/hermes
+
+      - name: Confirm upstream application and unrelated dependencies are unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -i --network none --entrypoint /usr/local/bin/python3 \
+            "$TEST_IMAGE" -B -I -S - --snapshot-only \
+            < images/hermes/build_overlay.py > derived-inventory.json
+          python3 -I images/hermes/build_overlay.py --compare-snapshots \
+            upstream-inventory.json derived-inventory.json
 
       - name: Confirm inherited startup contract
         shell: bash

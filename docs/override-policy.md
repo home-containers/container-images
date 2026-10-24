@@ -1,5 +1,13 @@
 # Dependency override policy
 
+## Base-image contract: overlays, not upstream rebuilds
+
+Every target must start `FROM` its official upstream image and apply only the necessary downstream modifications. For Hermes, the requested base is `nousresearch/hermes-agent:stable`; a build argument may resolve that image to its digest without changing this contract.
+
+Upstream Dockerfiles are context for understanding the shipped image, not build recipes to copy, follow from `main`, or execute in place of consuming the published image. Preserve the application and runtime already shipped in the base. Do not recreate the full application environment, invoke an upstream application/image assembler, or rebuild frontend/application artifacts as a routine dependency override. If a fix genuinely cannot be applied safely without that work, explain the limitation and obtain explicit approval for the exception first.
+
+This applies to Hermes, Camofox, Plex and future targets. Dependency overrides must still respect the application's lock/startup ownership; do not trade a broad rebuild for an incoherent package installation.
+
 ## First identify the code being executed
 
 Package names and scanner findings are leads, not an inventory of executed code. An OS shared library, a statically linked runtime, a native Python wheel and a browser can each contain independent copies of the same vulnerable library.

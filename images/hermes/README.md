@@ -9,8 +9,10 @@ Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Docker
 3. Ensure `libbrotli1` includes Debian's security backport, at least **`1.1.0-2+deb13u1`**. Verify both its Debian package version and the decoder's new error marker.
 4. Change the selected application dependency to **`brotlicffi==1.2.1.0`**, the fixed Python release for CVE-2026-111497. Do not downgrade a newer upstream pin.
 5. Refresh `uv.lock` through Hermes PM, rejecting unrelated package-entry changes. The root project's own changed dependency metadata is expected.
-6. Rebuild the upstream image's recorded extras through PM, refresh its dependency-selection stamp and reassemble the existing application/launchers using the upstream image assembler. No core Python source or frontend application code is patched.
-7. Verify the fixed Python and native decoders, HTTPX decoding, Node's patch marker and PM lock consistency.
+6. Replace **only the Brotli wheel in the existing `.venv`**, using bundled uv with `--no-deps`, `--require-hashes`, `--only-binary=:all:` and a package-scoped reinstall. This is an explicit downstream build-time exception because PM has no public API for a hash-enforced one-package in-place replacement. Update only the static Brotli dependency declaration and the PM selection stamp; preserve the shipped extras.
+7. Verify fixed decoders, HTTPX decoding, Node's patch marker and PM lock consistency. Compare SHA-256 inventories against the published base: application code, frontends, launchers, managed runtime files and unrelated installed dependencies must remain unchanged. Only the reviewed Brotli paths, dependency manifest/lock/declaration, selection facts and disposable caches/bytecode are excluded.
+
+**No upstream application rebuild:** the Dockerfile consumes the published `nousresearch/hermes-agent:stable` image. It does not fetch upstream `main`, recreate `.venv`, rebuild frontends or invoke the upstream assembler. A changed image layout or an override requiring broader changes must fail for review, not silently expand the build.
 
 ### The release-age policy
 
