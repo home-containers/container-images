@@ -41,7 +41,11 @@ def require(condition, message):
 
 def fixture_page(path):
     if path == '/brotli':
-        return ('<!doctype html><html><body>' + BROTLI_SENTINEL + '</body></html>').encode()
+        # Wrap the sentinel in an element: Camofox accessibility snapshots do
+        # not expose bare text nodes directly under <body>, so an unwrapped
+        # sentinel would never appear in the snapshot the driver polls.
+        return ('<!doctype html><html><body><p id="brotli">' + BROTLI_SENTINEL
+                + '</p></body></html>').encode()
     seed = ''
     if path == '/seed':
         seed = (f'document.cookie = "{COOKIE}={VALUE}; Path=/; Max-Age=86400; SameSite=Lax";'
@@ -395,8 +399,12 @@ class Acceptance:
         self.api('POST', f'/tabs/{tab}/navigate', {'userId': USER, 'url': ORIGIN + '/brotli'})
         def brotli():
             snapshot = self.snapshot(tab)
-            require(BROTLI_SENTINEL in snapshot.get('snapshot', ''),
-                    'browser did not decode real Brotli-compressed HTML')
+            if BROTLI_SENTINEL not in snapshot.get('snapshot', ''):
+                # Snapshot content is fixture text with no secrets; echo a
+                # bounded excerpt so a repeat failure is conclusive in one run.
+                content = snapshot.get('snapshot', '')
+                raise SmokeFailure('browser did not decode real Brotli-compressed '
+                                   'HTML; snapshot=' + repr(content[:200]))
             return True
         self.wait('browser Brotli decoding', brotli)
         self.wait('VNC and noVNC', self.vnc)

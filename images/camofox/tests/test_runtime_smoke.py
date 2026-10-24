@@ -50,6 +50,10 @@ class FixtureTests(unittest.TestCase):
         self.assertIn('Max-Age=', seed)
         self.assertIn(m.SENTINEL, check)
         self.assertIn(m.BROTLI_SENTINEL, m.fixture_page('/brotli').decode())
+        # The Brotli sentinel must sit inside an element (not bare body text):
+        # Camofox a11y snapshots omit bare text nodes, so an unwrapped sentinel
+        # silently regresses the runtime acceptance into a timeout.
+        self.assertIn('<p', m.fixture_page('/brotli').decode())
 
     def test_evaluation_rejects_missing_or_wrong_state_and_snapshot(self):
         m = load()
