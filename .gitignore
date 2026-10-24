@@ -1,0 +1,21 @@
+# Local secrets and runtime state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+/secrets/
+/state/
+/profiles/
+
+# Build/test outputs and local tooling
+/build/
+/dist/
+/artifacts/
+/coverage/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
