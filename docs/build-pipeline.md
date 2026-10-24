@@ -1,6 +1,6 @@
 # Build, publish and promote
 
-The end-to-end publishing/promotion pipeline below remains an implementation contract. A manual-only Hermes verification workflow now builds and tests on GitHub-hosted ARM64/AMD64 runners; it has no publishing permissions. No scheduled jobs, image publications or deployments are configured.
+The broader lifecycle below remains an implementation contract. Hermes has separate manual-only verification and publishing workflows on native GitHub-hosted ARM64/AMD64 runners. The publisher grants package write access only to its publishing jobs, tests and reads back each pushed image, then validates the multiarchitecture index before promoting `stable`. Check actual Actions/registry results; no scheduled jobs or production deployments are configured, and SBOM/signing/comprehensive scanning remain future work.
 
 ## Proposed lifecycle
 
@@ -22,7 +22,7 @@ One repository with independent image targets. Proposed packages:
 - `ghcr.io/home-containers/camofox`
 - `ghcr.io/home-containers/plex`
 
-These names are reserved by convention only; no packages have been published. Verify upstream licensing and redistribution terms before publishing each target, particularly images containing proprietary software.
+Hermes uses the first name; Camofox and Plex remain design-only targets. Confirm actual package availability after a publishing run. Verify upstream licensing and redistribution terms before publishing each target, particularly images containing proprietary software.
 
 A public source repo does not itself establish a package's visibility. Verify each GHCR package's intended visibility and an anonymous pull before advertising public access. Public deployment images should not require the production host to retain a publishing credential.
 

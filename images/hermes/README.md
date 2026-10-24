@@ -1,6 +1,6 @@
 # Hermes security overlay
 
-Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Dockerfile, lock-coherent override helper, read-only image checks and a manual GitHub Actions verification workflow are implemented. Consult the actual Actions run before treating a revision as verified. No GHCR publication or production deployment is configured.
+Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Dockerfile, lock-coherent override helper, read-only image checks and manual GitHub Actions verification/publication workflows are implemented. Consult actual Actions and registry results before treating a revision as verified or published. No production deployment is configured.
 
 ## What changes
 
@@ -64,6 +64,22 @@ It runs:
 - Checks that the override survives startup, the CLI runs, UID 10000 can write state, and shutdown does not require SIGKILL.
 
 Tests never mount production profiles, access provider credentials or reconnect the live Slack bot. The checks are targeted regression/patch checks, **not a comprehensive vulnerability scan or clearance of every bundled component**. Existing runtime dependency generations need a separate disposable-state migration test before deployment to an existing installation.
+
+## Publish: authorized manual runs only
+
+The separate `.github/workflows/hermes-publish.yml` workflow is dispatched manually from `main`. It repeats the same native ARM64/AMD64 tests, uses only job-scoped `GITHUB_TOKEN` credentials, and pushes the **exact tested images**. Each image is pulled back and its image ID and decoder checks verified before assembling the multiarchitecture index.
+
+```sh
+gh workflow run hermes-publish.yml --repo home-containers/container-images --ref main
+```
+
+Outputs:
+
+- `ghcr.io/home-containers/hermes:build-<run-id>-<attempt>` — unique build identifier; APT can change even for the same source commit.
+- `ghcr.io/home-containers/hermes:stable` — convenience tag promoted only after both native builds/tests and index validation pass.
+- `ghcr.io/home-containers/hermes@sha256:<digest>` — immutable deployment reference, recorded in the Actions summary.
+
+Per-architecture build tags are retained for traceability. Publishing is not production deployment. Registry authentication/readback is verified by CI; public visibility and anonymous pulls must be checked separately. A newly created GHCR package can require a one-time **Package settings → Change visibility → Public** action by the account owner. No SBOM, signing, provenance attestation or comprehensive scan is claimed by this workflow.
 
 ## Size and cache caveat
 

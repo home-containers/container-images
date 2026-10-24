@@ -6,7 +6,7 @@ The goal is to ship targeted dependency fixes without maintaining application fo
 
 ## Status
 
-The public design and policies are established. Hermes now has a Dockerfile, lock-coherent security override, tests and a **manual-only GitHub-hosted verification workflow**. Check its actual Actions results before treating a revision as verified. Camofox and Plex remain design-only targets. No image publishing, scheduled builds or production deployment is configured.
+The public design and policies are established. Hermes has a Dockerfile, lock-coherent security override, tests and **manual-only GitHub-hosted verification and publication workflows**. The publisher tests each native architecture, reads back the pushed images and assembles `ghcr.io/home-containers/hermes:stable` only after both succeed. Check actual Actions and registry results before treating a revision as published. Camofox and Plex remain design-only targets. No scheduled builds or production deployment is configured.
 
 ## Recommended approach
 

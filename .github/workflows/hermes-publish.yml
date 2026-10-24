@@ -1,0 +1,230 @@
+name: Publish Hermes security overlay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-publish
+  cancel-in-progress: false
+
+jobs:
+  native:
+    if: github.repository == 'home-containers/container-images' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    name: Build, test and push (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - arch: amd64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      IMAGE: ghcr.io/home-containers/hermes
+      ARCH: ${{ matrix.arch }}
+      BASE_TAG: nousresearch/hermes-agent:stable
+      TEST_IMAGE: hermes-security-overlay:ci
+      TEST_CONTAINER: hermes-security-overlay-test
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Test override logic without containers
+        run: python3 -I -m unittest discover -s images/hermes/tests -p 'test_*.py' -v
+
+      - name: Resolve upstream stable to an immutable input
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$BASE_TAG"
+          pin="$(docker image inspect "$BASE_TAG" --format '{{index .RepoDigests 0}}')"
+          if [[ ! "$pin" =~ ^nousresearch/hermes-agent@sha256:[0-9a-f]{64}$ ]]; then
+            printf 'Unexpected upstream digest format: %s\n' "$pin" >&2
+            exit 1
+          fi
+          printf 'BASE_PIN=%s\n' "$pin" >> "$GITHUB_ENV"
+          printf 'Resolved upstream: %s\n' "$pin"
+
+      - name: Snapshot shipped upstream application and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -i --network none --entrypoint /usr/local/bin/python3 \
+            "$BASE_PIN" -B -I -S - --snapshot-only \
+            < images/hermes/build_overlay.py > upstream-inventory.json
+
+      - name: Build the Debian and Python security overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull --no-cache --progress=plain \
+            --build-arg BASE_IMAGE="$BASE_PIN" \
+            --label org.opencontainers.image.source=https://github.com/home-containers/container-images \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --tag "$TEST_IMAGE" images/hermes
+
+      - name: Confirm upstream application and unrelated dependencies are unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -i --network none --entrypoint /usr/local/bin/python3 \
+            "$TEST_IMAGE" -B -I -S - --snapshot-only \
+            < images/hermes/build_overlay.py > derived-inventory.json
+          python3 -I images/hermes/build_overlay.py --compare-snapshots \
+            upstream-inventory.json derived-inventory.json
+
+      - name: Confirm inherited startup contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          def image(name):
+              return json.loads(subprocess.check_output(["docker", "image", "inspect", name]))[0]
+          base, derived = image(os.environ["BASE_PIN"]), image(os.environ["TEST_IMAGE"])
+          assert base["Architecture"] == derived["Architecture"]
+          for field in ("Entrypoint", "Cmd", "WorkingDir", "Volumes"):
+              assert base["Config"].get(field) == derived["Config"].get(field), field
+          assert base["Config"].get("User", "") in ("", "root", "0", "0:0")
+          assert derived["Config"]["User"] == "0:0"
+          assert base["Config"].get("Env") == derived["Config"].get("Env"), "runtime environment changed"
+          print("Architecture, startup contract and inherited environment: passed")
+          PY
+
+      - name: Verify patched libraries without networking
+        run: >-
+          docker run --rm --network none
+          --entrypoint /opt/hermes/.venv/bin/python
+          "$TEST_IMAGE" -I /usr/local/share/hermes-overlay/verify_image.py
+
+      - name: Test normal s6 startup using empty disposable state
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name "$TEST_CONTAINER" --network none \
+            --tmpfs /opt/data:rw,mode=0700 \
+            --env HERMES_DASHBOARD=false \
+            "$TEST_IMAGE" sleep 300
+          ready=false
+          for attempt in {1..90}; do
+            if [[ "$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER")" != true ]]; then
+              echo 'Container exited during initialization' >&2
+              docker logs "$TEST_CONTAINER"
+              exit 1
+            fi
+            if docker exec "$TEST_CONTAINER" ps -eo uid=,comm= | \
+                grep -Eq '^[[:space:]]*10000[[:space:]]+sleep$'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            docker logs "$TEST_CONTAINER"
+            echo 'Timed out waiting for the unprivileged main command' >&2
+            exit 1
+          fi
+          docker exec --user 10000:10000 --env HOME=/opt/data "$TEST_CONTAINER" \
+            /opt/hermes/.venv/bin/python -I /usr/local/share/hermes-overlay/verify_image.py
+          docker exec --user 10000:10000 --env HOME=/opt/data "$TEST_CONTAINER" \
+            /opt/hermes/.venv/bin/hermes --version
+          docker exec --user 10000:10000 --env HOME=/opt/data "$TEST_CONTAINER" \
+            /opt/hermes/.venv/bin/python -I -c \
+            'import os, pathlib; assert os.getuid() == 10000; p = pathlib.Path("/opt/data/overlay-volume-test"); p.write_text("ok"); assert p.read_text() == "ok"; p.unlink(); print("Unprivileged persistent-state writes: passed")'
+          docker stop --time 20 "$TEST_CONTAINER"
+          test "$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER")" = false
+          test "$(docker inspect --format '{{.State.OOMKilled}}' "$TEST_CONTAINER")" = false
+          code="$(docker inspect --format '{{.State.ExitCode}}' "$TEST_CONTAINER")"
+          case "$code" in
+            0|143) printf 'Orderly stop exit code: %s\n' "$code" ;;
+            *) printf 'Unexpected stop exit code: %s\n' "$code" >&2; exit 1 ;;
+          esac
+
+      - name: Remove disposable test container
+        if: always()
+        shell: bash
+        run: docker rm --force "$TEST_CONTAINER" 2>/dev/null || true
+
+      - name: Authenticate to GHCR after successful tests
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push and read back the exact tested native image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$IMAGE:build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${ARCH}"
+          tested_id="$(docker image inspect "$TEST_IMAGE" --format '{{.Id}}')"
+          docker tag "$TEST_IMAGE" "$tag"
+          docker push "$tag"
+          docker pull "$tag"
+          test "$(docker image inspect "$tag" --format '{{.Id}}')" = "$tested_id"
+          docker run --rm --network none --entrypoint /opt/hermes/.venv/bin/python \
+            "$tag" -I /usr/local/share/hermes-overlay/verify_image.py
+          printf 'Published and read back: `%s`\n' "$tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry login
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io
+
+  index:
+    name: Publish and verify multiarchitecture index
+    needs: native
+    if: github.repository == 'home-containers/container-images' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/home-containers/hermes
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to GHCR
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Assemble, verify and tag the tested index
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx imagetools create --tag "$IMAGE:$version" \
+            "$IMAGE:${version}-arm64" "$IMAGE:${version}-amd64"
+          docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' > index.json
+          digest="$(python3 -I .github/scripts/verify_hermes_index.py < index.json)"
+          docker buildx imagetools create --tag "$IMAGE:stable" "$IMAGE@$digest"
+          docker buildx imagetools inspect "$IMAGE:stable" --format '{{json .Manifest}}' > stable.json
+          stable_digest="$(python3 -I .github/scripts/verify_hermes_index.py < stable.json)"
+          test "$stable_digest" = "$digest"
+          cat index.json
+          printf 'Published `%s:%s` and `%s:stable`\n\nDigest pin: `%s@%s`\n\nSource: `%s`\n' \
+            "$IMAGE" "$version" "$IMAGE" "$IMAGE" "$digest" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry login
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io
