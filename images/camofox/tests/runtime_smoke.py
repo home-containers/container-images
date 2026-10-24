@@ -323,13 +323,15 @@ class Acceptance:
             entries = bindings.get(target) or []
             # Newer Docker daemons can report one binding per address family.
             # Every entry must be loopback (IPv4 127.0.0.0/8 or IPv6 ::1) with
-            # a usable port; wildcard or LAN addresses are rejected.
+            # a usable port; wildcard or LAN addresses are rejected. The raw
+            # bindings JSON contains no secrets and is echoed for diagnosis.
             require(bool(entries) and
-                    all(ipaddress.ip_address(entry['HostIp']).is_loopback
+                    all(ipaddress.ip_address(entry.get('HostIp', '') or '0.0.0.0').is_loopback
                         for entry in entries),
-                    'published port is not exclusively loopback')
+                    'published port is not exclusively loopback: ' + json.dumps(bindings))
             ports = {int(entry['HostPort']) for entry in entries}
-            require(len(ports) == 1, 'published port is ambiguous across bindings')
+            require(len(ports) == 1, 'published port is ambiguous across bindings: '
+                    + json.dumps(bindings))
             if target == '9377/tcp':
                 self.port = ports.pop()
             else:
