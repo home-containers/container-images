@@ -15,6 +15,22 @@ class ManifestOverrideTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def load_verify(self):
+        path = Path(__file__).with_name("verify_image.py")
+        spec = importlib.util.spec_from_file_location("hermes_verify_image", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_accepts_actual_native_decoder_error_string(self):
+        self.load_verify().require_native_patch_marker(b"_ERROR_FORMAT_BLOCK_SWITCH")
+
+    def test_rejects_an_unknown_native_decoder_error(self):
+        for marker in (None, b"INVALID", b"_ERROR_FORMAT_PADDING_1"):
+            with self.subTest(marker=marker), self.assertRaisesRegex(RuntimeError, "patch marker"):
+                self.load_verify().require_native_patch_marker(marker)
+
     def test_updates_only_the_brotli_requirement(self):
         original = '[project]\nname = "example"\nversion = "1"\n[project.optional-dependencies]\nmessaging = ["aiohttp==3.14.5", "brotlicffi==1.2.0.2"]\n'
         patched, changed = self.load().rewrite_brotlicffi_pin(original, "1.2.1.0")

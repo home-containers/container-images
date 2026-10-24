@@ -15,6 +15,11 @@ def require(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def require_native_patch_marker(marker: bytes | None) -> None:
+    # BrotliDecoderErrorString includes the _ERROR_ prefix from the C error list.
+    require(marker == b"_ERROR_FORMAT_BLOCK_SWITCH", "native decoder patch marker is missing")
+
+
 def main() -> int:
     report: dict = {"python": sys.version.split()[0], "executable": sys.executable}
     try:
@@ -43,7 +48,7 @@ def main() -> int:
         decoder.BrotliDecoderErrorString.restype = ctypes.c_char_p
         marker = decoder.BrotliDecoderErrorString(-17)
         report["native_decoder_error_minus17"] = marker.decode() if marker else None
-        require(marker == b"FORMAT_BLOCK_SWITCH", "native decoder patch marker is missing")
+        require_native_patch_marker(marker)
         node = json.loads(subprocess.check_output([
             "/usr/local/bin/node", "-p",
             'JSON.stringify({version:process.version,error:require("node:zlib").constants.BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH})',
