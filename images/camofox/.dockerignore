@@ -1,6 +1,7 @@
-**
-!Dockerfile
-!build_overlay.py
-!policy.json
-!tests/
-!tests/verify_image.py
+# Upstream source is the build context; never send local artifacts or secrets.
+.git
+node_modules
+**/__pycache__
+*.pyc
+.env
+.env.*

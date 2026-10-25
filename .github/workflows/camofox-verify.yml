@@ -1,4 +1,4 @@
-name: Verify Camofox security overlay
+name: Verify Camofox upstream recipe
 
 on:
   workflow_dispatch:
@@ -8,18 +8,18 @@ permissions:
 
 jobs:
   resolve:
-    name: Resolve immutable upstream and Node inputs
+    name: Resolve immutable source and Node inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      base_pin: ${{ steps.inputs.outputs.base_pin }}
+      source_revision: ${{ steps.inputs.outputs.source_revision }}
       node_pin: ${{ steps.inputs.outputs.node_pin }}
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Resolve both registry indexes once per run
+      - name: Resolve fixed Node index and approved source once per run
         id: inputs
         shell: bash
         run: |
@@ -40,13 +40,21 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      BASE_PIN: ${{ needs.resolve.outputs.base_pin }}
+      ARCH: ${{ matrix.arch }}
+      SOURCE_REVISION: ${{ needs.resolve.outputs.source_revision }}
       NODE_PIN: ${{ needs.resolve.outputs.node_pin }}
-      TEST_IMAGE: camofox-security-overlay:ci
+      TEST_IMAGE: camofox-upstream-recipe:ci
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
+      - name: Check out immutable upstream source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: jo-inc/camofox-browser
+          ref: ${{ needs.resolve.outputs.source_revision }}
+          path: upstream-camofox
           persist-credentials: false
       - name: Accept the native image
         uses: ./.github/actions/camofox-accept

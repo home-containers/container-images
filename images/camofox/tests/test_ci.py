@@ -141,7 +141,7 @@ class ResolverTests(unittest.TestCase):
             module.build_opener = original_opener
             module.Request = original_request
 
-    def test_resolves_fixed_latest_and_node_once_without_credentials(self):
+    def test_resolves_only_fixed_node_and_approved_source_without_credentials(self):
         calls = []
         body, digest = encoded(index())
 
@@ -156,13 +156,36 @@ class ResolverTests(unittest.TestCase):
 
         result = resolver().resolve_inputs(fetch)
         self.assertEqual(result, {
-            'base_pin': 'ghcr.io/jo-inc/camofox-browser@' + digest,
+            'source_revision': '39c82094013480b373df6600d44c7f036f58356e',
             'node_pin': 'node@' + digest})
         self.assertEqual([url for url, _ in calls], [
-            'https://ghcr.io/token?service=ghcr.io&scope=repository%3Ajo-inc%2Fcamofox-browser%3Apull',
-            'https://ghcr.io/v2/jo-inc/camofox-browser/manifests/latest',
             'https://auth.docker.io/token?service=registry.docker.io&scope=repository%3Alibrary%2Fnode%3Apull',
             'https://registry-1.docker.io/v2/library/node/manifests/22.23.4-trixie-slim'])
+
+    def test_policy_source_cannot_drift_or_inject_outputs(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / 'policy.json'
+            approved = {'repository': 'jo-inc/camofox-browser',
+                        'revision': '39c82094013480b373df6600d44c7f036f58356e',
+                        'release': 'v1.18.1'}
+            policy.write_text(json.dumps({'source': approved}))
+            self.assertEqual(resolver().source_revision(policy), approved['revision'])
+            for field, bad in [('repository', 'evil/camofox'), ('revision', 'a'*40),
+                               ('revision', approved['revision'] + '\npoison=yes'),
+                               ('release', 'latest')]:
+                value = dict(approved); value[field] = bad
+                policy.write_text(json.dumps({'source': value}))
+                with self.subTest(field=field, value=bad), self.assertRaises(ValueError):
+                    resolver().source_revision(policy)
+            for bad in [None, {}, [], '39c8209']:
+                policy.write_text(json.dumps({'source': bad}))
+                with self.assertRaises(ValueError):
+                    resolver().source_revision(policy)
+            # The approved constant remains usable during migration before the
+            # sibling core policy adds its source field; no mutable ref fallback.
+            policy.write_text('{}')
+            self.assertEqual(resolver().source_revision(policy), approved['revision'])
 
     def test_node_donor_accepts_its_additional_official_linux_architectures(self):
         base_body, base_digest = encoded(index())
@@ -208,7 +231,7 @@ class ResolverTests(unittest.TestCase):
         import contextlib
         import io
         import tempfile
-        pins = {'base_pin': 'ghcr.io/jo-inc/camofox-browser@sha256:' + 'a'*64,
+        pins = {'source_revision': '39c82094013480b373df6600d44c7f036f58356e',
                 'node_pin': 'node@sha256:' + 'b'*64}
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / 'output'
@@ -227,19 +250,34 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(text.count('uses: ./.github/actions/camofox-accept'), 1)
             self.assertNotIn('docker build --', text)
             self.assertIn('needs: resolve', text)
-            self.assertIn('BASE_PIN: ${{ needs.resolve.outputs.base_pin }}', text)
+            self.assertNotIn('BASE_PIN', text)
+            self.assertIn('SOURCE_REVISION: ${{ needs.resolve.outputs.source_revision }}', text)
+            self.assertIn('ARCH: ${{ matrix.arch }}', text)
+            self.assertIn('repository: jo-inc/camofox-browser', text)
+            self.assertIn('ref: ${{ needs.resolve.outputs.source_revision }}', text)
+            self.assertIn('path: upstream-camofox', text)
             self.assertIn('NODE_PIN: ${{ needs.resolve.outputs.node_pin }}', text)
-            self.assertIn('TEST_IMAGE: camofox-security-overlay:ci', text)
+            self.assertIn('TEST_IMAGE: camofox-upstream-recipe:ci', text)
         for required in ('python3 -I -m unittest discover -s images/camofox/tests',
-                         '--build-arg BASE_IMAGE="$BASE_PIN"', '--build-arg NODE_IMAGE="$NODE_PIN"',
-                         '--no-cache --progress=plain', 'org.opencontainers.image.source=',
-                         'org.opencontainers.image.revision="$GITHUB_SHA"', '--compare-snapshots',
-                         '"Architecture"', '"Entrypoint"', '"Cmd"', '"User"', '"WorkingDir"',
-                         '"Volumes"', '"Env"', '"ExposedPorts"',
-                         '/usr/local/share/camofox-overlay/verify_image.py',
+                         '--build-arg NODE_IMAGE="$NODE_PIN"',
+                         '--no-cache --progress=plain', '--platform "linux/$ARCH"',
+                         'org.opencontainers.image.source=',
+                         'org.opencontainers.image.revision="$GITHUB_SHA"',
+                         'io.camofox.upstream.revision="$SOURCE_REVISION"',
+                         'test "$(git -C upstream-camofox rev-parse HEAD)" = "$SOURCE_REVISION"',
+                         'uname -m', 'x86_64:amd64|aarch64:arm64',
+                         'upstream-camofox/.container-images/', 'images/camofox/build_overlay.py',
+                         'images/camofox/policy.json', 'images/camofox/tests/verify_image.py',
+                         '--file images/camofox/Dockerfile', '"$TEST_IMAGE" upstream-camofox',
+                         'docker cp "$container:/app/." -', 'docker rm "$container"',
+                         'verify_camofox_source.py', '--source upstream-camofox',
+                         '--image-inspect', '--arch "$ARCH"',
+                         '/usr/local/share/camofox-build/verify_image.py',
                          'python3 images/camofox/tests/runtime_smoke.py --image "$TEST_IMAGE"'):
             self.assertIn(required, action)
-        self.assertNotIn('continue-on-error', action)
+        for forbidden in ('continue-on-error', 'BASE_PIN', 'BASE_IMAGE', '--snapshot-only',
+                          '--compare-snapshots', 'camofox-overlay/verify_image.py'):
+            self.assertNotIn(forbidden, action)
 
     def test_manual_readonly_native_and_publish_guards(self):
         import re
@@ -276,7 +314,8 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotIn('packages:', text)
                 self.assertNotIn('GITHUB_TOKEN', text)
             self.assertEqual(text.count('python3 -I .github/scripts/resolve_camofox_inputs.py'), 1)
-            self.assertIn('base_pin: ${{ steps.inputs.outputs.base_pin }}', text)
+            self.assertIn('source_revision: ${{ steps.inputs.outputs.source_revision }}', text)
+            self.assertNotIn('base_pin', text)
             self.assertIn('node_pin: ${{ steps.inputs.outputs.node_pin }}', text)
 
 

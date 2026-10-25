@@ -6,7 +6,7 @@ Every target must start `FROM` its official upstream image and apply only the ne
 
 Upstream Dockerfiles are context for understanding the shipped image, not build recipes to copy, follow from `main`, or execute in place of consuming the published image. Preserve the application and runtime already shipped in the base. Do not recreate the full application environment, invoke an upstream application/image assembler, or rebuild frontend/application artifacts as a routine dependency override. If a fix genuinely cannot be applied safely without that work, explain the limitation and obtain explicit approval for the exception first.
 
-This applies to Hermes, Camofox, Plex and future targets. Dependency overrides must still respect the application's lock/startup ownership; do not trade a broad rebuild for an incoherent package installation.
+This remains the default for Hermes, Plex and future targets. **Approved Camofox exception:** build upstream v1.18.1 source at `39c82094013480b373df6600d44c7f036f58356e` using a lightly updated `Dockerfile.ci`, an official digest-pinned Node base and the publisher's beta.30 browser artifact installed once. Preserve upstream application files and its lockfile; use its normal `npm ci` native-addon build. This avoids retaining beta.28 beneath a replacement browser. It does not authorize following application `main`, compiling the browser, or rebuilding Hermes. Dependency overrides must still respect the application's lock/startup ownership.
 
 ## First identify the code being executed
 

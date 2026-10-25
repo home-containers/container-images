@@ -1,63 +1,116 @@
-# Camofox security overlay
+# Camofox upstream-recipe build
 
-A thin derivative of **`ghcr.io/jo-inc/camofox-browser:latest`**. CI resolves that requested tag once to an immutable multiarchitecture digest and supplies the same input to both native jobs. This does not rebuild Camofox, run `npm ci`, compile the browser, or import the historical local source-build/slimming recipe.
+Build the unmodified **Camofox v1.18.1 application source** at commit
+`39c82094013480b373df6600d44c7f036f58356e` using a reviewed adaptation of
+that release's `Dockerfile.ci`. This is an explicitly approved exception to
+this repository's default upstream-image overlay policy. Hermes is unchanged.
 
-Implementation, native acceptance, publication and production deployment are distinct milestones. Inspect the exact Actions run and source revision for test evidence. No schedules or automatic deployments are configured.
+The previous image-overlay implementation retained upstream's beta.28 browser
+layer and added beta.30 in another layer. This recipe installs beta.30 once,
+following the build-argument workaround described in upstream issue #14575.
+It does not compile Firefox/Camoufox or track application `main`.
 
-## Narrow overrides
+Implementation, native acceptance, publication and production deployment are
+separate milestones. A changed recipe is not proof of a tested or published
+image. No schedules or automatic production deployments are configured.
 
-- **Debian:** require trixie, refresh APT indexes and upgrade installed distro packages. Keep Python's interpreter and standard library under APT ownership; no pip overwrite or transplanted standalone interpreter. Enforce `policy.json` package floors using Debian version comparison.
-- **Node:** retain the compatible 22.x major. Replace only the executable, if needed, from a digest-resolved official `node:22.23.4-trixie-slim` donor. Preserve a newer compatible patched inherited executable instead of downgrading. Do not copy the donor's entire `/usr/local`, replace npm, or rebuild native addons to hide incompatibility.
-- **Brotli:** check Debian's shared library, Node's bundled decoder, installed Python bindings where present, and browser patch evidence separately. Do not add absent optional bindings. An unexpected vulnerable binding requires an ownership-aware fix rather than a blanket pip mutation.
-- **Browser:** retain at least Camoufox `152.0.4-beta.30`; the published base's older browser must not silently replace the existing deployment's beta.30. Where needed, install only the publisher's architecture-specific prebuilt archive using the URL and SHA-256 recorded in `policy.json`. Validate before extraction; do not compile the browser or downgrade a newer compatible inherited release.
-- **VNC compatibility:** install the distro runtime packages required by the shipped upstream plugin: `x11vnc`, `novnc`, `python3-websockify`, `net-tools`, `procps`. Enable it only at runtime through upstream's `ENABLE_VNC=1`. No application-source/configuration patch, password or private deployment configuration is baked in.
+## Reviewed changes relative to upstream
 
-The application tree, `node_modules`, native addons, plugin code and configuration remain unchanged. CI compares file hashes, modes and symlink targets, rejects missing representative coverage and detects additions/deletions. Browser and Node overrides are explicit exceptions outside `/app`. Entrypoint, CMD, user, working directory, environment and declared volumes remain inherited.
+- **Base/runtime:** use official `node:22.23.4-trixie-slim`, resolved to a
+  multiarchitecture digest once per run. Do not transplant a Node executable
+  into an already-built application image.
+- **Browser:** install publisher-built Camoufox `152.0.4-beta.30` directly,
+  using the per-architecture URLs, SHA-256 values and identical-artifact mirror
+  in `policy.json`. Validate the archive before extraction and remove temporary
+  downloads in the same layer. There is no inherited browser replacement.
+- **Debian:** update supported trixie packages and retain APT ownership of Python
+  and its matching standard library. Keep security floors for Python and
+  `libbrotli1`; do not add absent optional Python Brotli bindings.
+- **Native dependencies:** run `npm ci --omit=dev` using the exact upstream
+  lockfile. Install and purge `build-essential` in the same build step so the
+  compiler installation does not remain in a lower image layer. Route npm's
+  download cache to `/var/cache/camofox-npm` and delete it in that same step;
+  retain installed dependencies and their native runtime addons.
+- **Package recommendations:** use `--no-install-recommends` for direct APT
+  installations. Apply the same policy to unmodified upstream plugin hooks
+  through a build-step-only `APT_CONFIG`, removed on success or failure.
+  Explicitly install `xauth` so `xvfb-run` authentication remains available;
+  retain the named fonts, graphics libraries, plugins and VNC stack. This
+  policy does not change runtime APT defaults or startup environment.
+- **VNC:** include `x11vnc`, `novnc`, `python3-websockify`, `net-tools` and `procps`
+  for the upstream plugin. Enable only at runtime using `ENABLE_VNC=1`; bake in
+  no passwords, profiles or private configuration.
+- **Application/startup:** leave upstream application files, manifests, plugin
+  configuration, Node entrypoint and server command unchanged. Installed native
+  addons are built/resolved by upstream's normal locked installation rather
+  than copied from another application image.
+
+Retain upstream's per-architecture yt-dlp integrity checks. Do not substitute a
+new application revision, remove required fonts or strip browser features as
+an unreviewed size optimization.
 
 ## Security floors and limitations
 
-Initial policy: Node 22.23.4 or newer compatible 22.x; Debian `libbrotli1 >= 1.1.0-2+deb13u1`; Debian `python3.13 >= 3.13.5-2+deb13u5` with matching standard-library packages. An older upstream version string can include a distro backport.
+Policy requires compatible Node 22.x at least 22.23.4, Debian
+`libbrotli1 >= 1.1.0-2+deb13u1`, and Debian
+`python3.13 >= 3.13.5-2+deb13u5` with matching standard-library packages.
+Security backports can retain older-looking upstream version strings.
 
-`BrotliDecoderErrorString(-17)` must return exactly `_ERROR_FORMAT_BLOCK_SWITCH`; Node's corresponding constant must equal -17. These checks support a targeted patch assessment, not universal vulnerability clearance. A browser marker is not a browser-wide security audit. Debian still lists open Python 3.13 issues: its supported updates do not fix every upstream advisory. Comprehensive vendored-binary scanning, SBOM generation and signing are not claimed.
+Exact runtime patch-marker checks supplement package metadata:
+`BrotliDecoderErrorString(-17)` must return `_ERROR_FORMAT_BLOCK_SWITCH`, and
+Node's corresponding constant must equal -17. Browser patch evidence is
+checked separately. These are targeted checks, not full vulnerability
+clearance. Debian Python can still have open upstream advisories; comprehensive
+vendored-binary scanning, SBOM generation and signing are not claimed.
 
-Unsupported distro/Node-major changes, unexpected vulnerable bindings and unrecognizable browser releases must fail visibly instead of silently broadening the overlay.
+Brotli update acceptance does **not** require a compressed-page browser fixture
+or an exploit-containment test. Ordinary navigation remains mandatory.
 
 ## Workflows and tests
 
-- `.github/workflows/camofox-verify.yml`: manual-only, read-only, no registry writes.
-- `.github/workflows/camofox-publish.yml`: separate manual-only, main-branch publisher; package write permissions only on publishing jobs.
-- `.github/actions/camofox-accept/action.yml`: shared native acceptance used by both workflows, preventing test drift.
+- `.github/workflows/camofox-verify.yml`: manual-only verification, no registry writes.
+- `.github/workflows/camofox-publish.yml`: separate manual-only main-guarded publisher.
+- `.github/actions/camofox-accept/action.yml`: shared native acceptance for both paths.
 
-Build only on GitHub-hosted native `ubuntu-24.04-arm` and `ubuntu-24.04` runners, never locally or on the production host.
-
-Local tests without containers:
-
-```sh
-python3 -I -m unittest discover -s images/camofox/tests -p 'test_*.py' -v
-```
-
-After source review, dispatch verification:
+Build only on GitHub-hosted native ARM64 and AMD64 runners, never locally or on
+the production host. Local helper tests do not invoke Docker:
 
 ```sh
-gh workflow run camofox-verify.yml --repo home-containers/container-images --ref main
+python3 -B -I -m unittest discover -s images/camofox/tests -p 'test_*.py' -v
 ```
 
-Acceptance covers helper regressions, immutable inputs, inherited startup metadata, application/dependency preservation, security floors/decoders, native SQLite, actual controlled-page browser navigation, API authentication, cookie/localStorage persistence across restart, noVNC and a real RFB handshake, writable disposable state and orderly shutdown. Brotli update acceptance relies on package versions and patch evidence, not a browser compressed-page rendering test or exploit-containment test. A green `/health` alone is not acceptance evidence.
+Acceptance checks immutable source and Node inputs, installed application
+source content/modes/symlinks, startup metadata, security floors, native SQLite,
+authentication, real browser navigation, cookie/localStorage persistence across
+restart and container recreation, noVNC HTML plus actual WebSocket RFB, clean
+exits and verified resource cleanup. A green `/health` alone is insufficient.
 
-Runtime tests generate ephemeral credentials and use synthetic profiles on an isolated network. They do not use production cookies, keys, identities or host configuration.
+Runtime tests use disposable credentials and synthetic state. The fixture uses
+an internal network; a supplementary bridge permits loopback port publication
+and also permits app egress. Do not describe the app as internet-isolated.
 
-## Publication and deployment
+## Image size and publication
 
-Intended package: `ghcr.io/home-containers/camofox-browser`. A checked-in recipe does not prove this image exists or is public. The separate publisher repeats native acceptance, pushes the exact tested images, pulls them back and checks identity/security, then validates the combined index before promoting `stable`.
+Measure compressed registry layers and unpacked native layer sizes separately;
+Docker's containerd store can retain both. Replacing the recipe is expected to
+remove browser-duplication and retained-compiler costs, but actual savings must
+come from the native build output, not estimates alone.
 
-Tags are `build-<run-id>-<attempt>` plus a recorded digest. After failure, dispatch afresh or rerun **all** jobs; never mix architecture outputs from different attempts. Verify anonymous registry access separately. Production replacement, state migration and restart need separate authorization.
+Package identity remains `ghcr.io/home-containers/camofox-browser`. Publication
+repeats native acceptance, pushes the exact tested images, pulls them back,
+checks identity/security, then verifies the combined index before promoting
+`stable`. Build tags include run ID and attempt. Never combine architecture
+outputs across attempts; verify anonymous access separately.
+
+Publication and the NixOS deployment pin are separate approvals. Existing
+published images and the running services stay unchanged until those steps
+are explicitly authorized.
 
 ## Primary references
 
+- Upstream issue: https://github.com/jo-inc/camofox-browser/issues/14575
+- Recipe baseline: https://github.com/jo-inc/camofox-browser/blob/39c82094013480b373df6600d44c7f036f58356e/Dockerfile.ci
 - Publisher: https://github.com/jo-inc/camofox-browser/blob/master/.github/workflows/docker.yml
-- Upstream Dockerfile (context only): https://github.com/jo-inc/camofox-browser/blob/master/Dockerfile.ci
 - Node advisory: https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
 - Debian Brotli: https://security-tracker.debian.org/tracker/source-package/brotli
 - Debian Python: https://security-tracker.debian.org/tracker/source-package/python3.13
-
-Keep publisher provenance alongside browser URLs and hashes in `policy.json` when updating the lock.

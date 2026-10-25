@@ -1,6 +1,6 @@
 # Build, publish and promote
 
-The broader lifecycle below remains an implementation contract. Hermes and Camofox have separate manual-only verification and publishing workflows on native GitHub-hosted ARM64/AMD64 runners. Camofox shares its acceptance steps between both paths and resolves upstream `ghcr.io/jo-inc/camofox-browser:latest` once per run. Each publisher grants package write access only to publishing jobs, tests and reads back each pushed image, then validates the multiarchitecture index before promoting `stable`. Check actual Actions/registry results; no scheduled jobs or production deployments are configured, and SBOM/signing/comprehensive scanning remain future work.
+The broader lifecycle below remains an implementation contract. Hermes and Camofox have separate manual-only verification and publishing workflows on native GitHub-hosted ARM64/AMD64 runners. Camofox shares its acceptance steps between both paths, checks out a fixed upstream application release commit, and resolves the official Node base to a digest once per run. This is an explicitly approved upstream-recipe build, not an overlay on the published Camofox image. Each publisher grants package write access only to publishing jobs, tests and reads back each pushed image, then validates the multiarchitecture index before promoting `stable`. Check actual Actions/registry results; no scheduled jobs or production deployments are configured, and SBOM/signing/comprehensive scanning remain future work.
 
 ## Proposed lifecycle
 

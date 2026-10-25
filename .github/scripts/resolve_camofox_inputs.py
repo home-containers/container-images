@@ -1,4 +1,4 @@
-"""Resolve fixed public registry indexes to checked immutable Camofox inputs."""
+"""Resolve official Node and the approved Camofox source revision, without login."""
 import hashlib
 import json
 import re
@@ -76,17 +76,31 @@ def fetch_registry(url, headers):
         return body, response.headers
 
 
+APPROVED_SOURCE = {
+    'repository': 'jo-inc/camofox-browser',
+    'revision': '39c82094013480b373df6600d44c7f036f58356e',
+    'release': 'v1.18.1',
+}
+
+
+def source_revision(policy_path=None):
+    """Only the reviewed release SHA is a valid source, never a tag or URL input."""
+    if policy_path is None:
+        policy_path = Path(__file__).resolve().parents[2] / 'images/camofox/policy.json'
+    policy = json.loads(Path(policy_path).read_text(encoding='utf-8'))
+    if not isinstance(policy, dict) or policy.get('source', APPROVED_SOURCE) != APPROVED_SOURCE:
+        raise ValueError('Camofox source must match the approved immutable release')
+    return APPROVED_SOURCE['revision']
+
+
 def resolve_inputs(fetch=fetch_registry):
     """Resolve each fixed tag once, independently of Docker or login state."""
     targets = (
-        ('base_pin', 'ghcr.io/jo-inc/camofox-browser',
-         'https://ghcr.io/token', 'ghcr.io', 'jo-inc/camofox-browser',
-         'https://ghcr.io/v2/jo-inc/camofox-browser/manifests/latest'),
         ('node_pin', 'node', 'https://auth.docker.io/token',
          'registry.docker.io', 'library/node',
          'https://registry-1.docker.io/v2/library/node/manifests/22.23.4-trixie-slim'),
     )
-    pins = {}
+    pins = {'source_revision': source_revision()}
     for key, image, token_url, service, repository, manifest_url in targets:
         query = urlencode({'service': service, 'scope': f'repository:{repository}:pull'})
         token_body, _ = fetch(token_url + '?' + query, {'Accept': 'application/json'})
@@ -100,9 +114,8 @@ def resolve_inputs(fetch=fetch_registry):
         })
         if headers.get('Content-Type', '').split(';', 1)[0].strip() not in INDEX_TYPES:
             raise ValueError('Registry response is not an index mediaType')
-        # Official Node also publishes PPC64LE/S390X. Those inputs do not expand
-        # our advertised output architectures; Camofox's index stays strict.
-        extras = ('ppc64le', 's390x') if key == 'node_pin' else ()
+        # Extra official Node platforms never expand our output platforms.
+        extras = ('ppc64le', 's390x')
         digest = validate_index(body, headers.get('Docker-Content-Digest'), extras)
         pins[key] = image + '@' + digest
     return pins

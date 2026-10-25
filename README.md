@@ -1,16 +1,18 @@
 # Container images
 
-Small, reviewed derivative images built on trusted upstream release images.
+Reviewed container recipes using trusted upstream releases and targeted dependency updates.
 
 The goal is to ship targeted dependency fixes without maintaining application forks. Start with Hermes, Camofox and Plex; add other images independently.
 
 ## Status
 
-The public design and policies are established. Hermes has a Dockerfile, lock-coherent security override, tests and **manual-only GitHub-hosted verification and publication workflows**. The publisher tests each native architecture, reads back the pushed images and assembles `ghcr.io/home-containers/hermes:stable` only after both succeed. Camofox adds a separate upstream-`latest` thin overlay with shared native acceptance and separate manual verification/publication. Check actual Actions and registry results before treating a revision as tested or published. Plex remains design-only. No scheduled builds or production deployment is configured.
+The public design and policies are established. Hermes has a Dockerfile, lock-coherent security override, tests and **manual-only GitHub-hosted verification and publication workflows**. The publisher tests each native architecture, reads back the pushed images and assembles `ghcr.io/home-containers/hermes:stable` only after both succeed. Camofox uses a separately approved pinned-upstream-source build with a lightly updated upstream Dockerfile, shared native acceptance and separate manual verification/publication. Check actual Actions and registry results before treating a revision as tested or published; prior overlay images do not establish that the new recipe passed. Plex remains design-only. No scheduled builds or production deployment is configured.
 
 ## Recommended approach
 
 **Use a publisher image as the base, plus a minimal application-specific overlay.** Do not make one universal Dockerfile that upgrades everything in every image.
+
+Camofox is an explicitly approved exception: build pinned v1.18.1 source using the upstream recipe, installing the desired browser once rather than retaining an older browser layer beneath a replacement. Do not extend this exception to Hermes, Plex or application `main`.
 
 Illustrative base syntax (replace the placeholders with a verified release and digest):
 
@@ -55,7 +57,7 @@ Hermes and Camofox include recipes, override helpers and executable tests; verif
 ## Defaults
 
 - Public source repository; never include runtime profiles, private configuration, media, login state or credentials.
-- Published upstream bases, resolved to digests in CI. Prefer release tags unless explicitly requested otherwise (Camofox uses upstream `latest`); never rebuild application `main` as a substitute.
+- Published upstream bases, resolved to digests in CI. Prefer release tags; never rebuild application `main` as a substitute. Camofox's approved exception uses a fixed upstream release commit and a digest-resolved official Node base.
 - Independent image versions and platform lists; start only with architectures actually needed and supported.
 - Prefer the fixed upstream image over a custom override whenever it meets the same tests.
 - Targeted changes first. A broader distro-package refresh is allowed only after an image-specific review and regression tests.

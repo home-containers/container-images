@@ -245,14 +245,15 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-inventory", action="store_true")
-    parser.add_argument("--policy", default="/usr/local/share/camofox-overlay/policy.json")
-    parser.add_argument("--evidence", default="/usr/local/share/camofox-overlay/evidence.json")
+    parser.add_argument("--policy", default="/usr/local/share/camofox-build/policy.json")
+    parser.add_argument("--evidence", help="optional explicit runtime hash evidence (not needed for source builds)")
     args = parser.parse_args()
     try:
         if args.python_inventory:
             result = local_python_inventory()
         else:
-            result = verify(json.loads(Path(args.policy).read_text()), json.loads(Path(args.evidence).read_text()))
+            expected = json.loads(Path(args.evidence).read_text()) if args.evidence else None
+            result = verify(json.loads(Path(args.policy).read_text()), expected)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, OSError, KeyError, TypeError, StopIteration, subprocess.SubprocessError) as exc:
