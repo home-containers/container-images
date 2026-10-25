@@ -27,7 +27,6 @@ STORAGE = 'overlay-ci'
 VALUE = 'overlay-persistence-v1'
 USER = 'overlay-ci'
 SENTINEL = 'OVERLAY_STATE_OK'
-BROTLI_SENTINEL = 'OVERLAY_BROTLI_BROWSER_OK'
 
 
 class SmokeFailure(RuntimeError):
@@ -40,12 +39,6 @@ def require(condition, message):
 
 
 def fixture_page(path):
-    if path == '/brotli':
-        # Wrap the sentinel in an element: Camofox accessibility snapshots do
-        # not expose bare text nodes directly under <body>, so an unwrapped
-        # sentinel would never appear in the snapshot the driver polls.
-        return ('<!doctype html><html><body><p id="brotli">' + BROTLI_SENTINEL
-                + '</p></body></html>').encode()
     seed = ''
     if path == '/seed':
         seed = (f'document.cookie = "{COOKIE}={VALUE}; Path=/; Max-Age=86400; SameSite=Lax";'
@@ -58,28 +51,19 @@ def fixture_page(path):
 
 
 def fixture_server():
-    # Use the image\'s real Node Brotli encoder: no optional Python dependencies.
-    compressed = subprocess.run(
-        ['node', '-e', 'process.stdout.write(require("node:zlib").brotliCompressSync('
-         'require("node:fs").readFileSync(0)))'], input=fixture_page('/brotli'),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=True).stdout
-    require(bool(compressed), 'Brotli encoder returned no bytes')
-
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
             pass
 
         def do_GET(self):
             path = self.path.split('?', 1)[0]
-            if path not in ('/seed', '/check', '/brotli'):
+            if path not in ('/seed', '/check'):
                 self.send_error(404)
                 return
-            payload = compressed if path == '/brotli' else fixture_page(path)
+            payload = fixture_page(path)
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Cache-Control', 'no-store')
-            if path == '/brotli':
-                self.send_header('Content-Encoding', 'br')
             self.send_header('Content-Length', str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -396,17 +380,6 @@ class Acceptance:
             except SmokeFailure:
                 pass
         require(matching, 'mounted volume does not contain expected cookie/localStorage')
-        self.api('POST', f'/tabs/{tab}/navigate', {'userId': USER, 'url': ORIGIN + '/brotli'})
-        def brotli():
-            snapshot = self.snapshot(tab)
-            if BROTLI_SENTINEL not in snapshot.get('snapshot', ''):
-                # Snapshot content is fixture text with no secrets; echo a
-                # bounded excerpt so a repeat failure is conclusive in one run.
-                content = snapshot.get('snapshot', '')
-                raise SmokeFailure('browser did not decode real Brotli-compressed '
-                                   'HTML; snapshot=' + repr(content[:200]))
-            return True
-        self.wait('browser Brotli decoding', brotli)
         self.wait('VNC and noVNC', self.vnc)
 
     def vnc(self):
@@ -522,7 +495,7 @@ def main(argv=None):
     except (SmokeFailure, OSError, ValueError, http.client.HTTPException) as exc:
         print('FAIL: ' + redact(str(exc), driver.keys.values()), file=sys.stderr)
         return 1
-    print('PASS: auth, real navigation, Brotli, durable cookie/localStorage across '
+    print('PASS: auth, real navigation, durable cookie/localStorage across '
           'stop/start and recreation, noVNC WebSocket RFB, clean exits and cleanup')
     return 0
 

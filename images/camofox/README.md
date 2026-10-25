@@ -42,7 +42,7 @@ After source review, dispatch verification:
 gh workflow run camofox-verify.yml --repo home-containers/container-images --ref main
 ```
 
-Acceptance covers helper regressions, immutable inputs, inherited startup metadata, application/dependency preservation, security floors/decoders, native SQLite, actual controlled-page browser navigation and Brotli decoding, API authentication, cookie/localStorage persistence across restart, noVNC and a real RFB handshake, writable disposable state and orderly shutdown. A green `/health` alone is not acceptance evidence.
+Acceptance covers helper regressions, immutable inputs, inherited startup metadata, application/dependency preservation, security floors/decoders, native SQLite, actual controlled-page browser navigation, API authentication, cookie/localStorage persistence across restart, noVNC and a real RFB handshake, writable disposable state and orderly shutdown. Brotli update acceptance relies on package versions and patch evidence, not a browser compressed-page rendering test or exploit-containment test. A green `/health` alone is not acceptance evidence.
 
 Runtime tests generate ephemeral credentials and use synthetic profiles on an isolated network. They do not use production cookies, keys, identities or host configuration.
 

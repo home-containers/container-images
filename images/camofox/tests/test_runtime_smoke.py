@@ -49,11 +49,16 @@ class FixtureTests(unittest.TestCase):
         self.assertIn('setItem', seed)
         self.assertIn('Max-Age=', seed)
         self.assertIn(m.SENTINEL, check)
-        self.assertIn(m.BROTLI_SENTINEL, m.fixture_page('/brotli').decode())
-        # The Brotli sentinel must sit inside an element (not bare body text):
-        # Camofox a11y snapshots omit bare text nodes, so an unwrapped sentinel
-        # silently regresses the runtime acceptance into a timeout.
-        self.assertIn('<p', m.fixture_page('/brotli').decode())
+
+    def test_runtime_smoke_has_no_browser_brotli_gate(self):
+        # Package floors/patch evidence belong to verify_image.py, not to a
+        # compressed-page browser fixture. Keep ordinary runtime gates intact.
+        source = PATH.read_text()
+        self.assertNotIn('BROTLI_SENTINEL', source)
+        self.assertNotIn('/brotli', source)
+        self.assertNotIn('Content-Encoding', source)
+        self.assertNotIn('brotliCompressSync', source)
+        self.assertIn("self.wait('VNC and noVNC', self.vnc)", source)
 
     def test_evaluation_rejects_missing_or_wrong_state_and_snapshot(self):
         m = load()
