@@ -23,6 +23,16 @@ class ManifestOverrideTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_prebuilt_tui_allows_only_the_expected_build_tool_drift(self):
+        check = self.load_verify().unexpected_pm_drift
+        missing = {"pnpm": "not installed or outdated"}
+        self.assertEqual(check(missing, prebuilt_tui=True), {})
+        self.assertEqual(check(missing, prebuilt_tui=False), missing)
+        self.assertEqual(check({**missing, "venv": "changed"}, prebuilt_tui=True),
+                         {"venv": "changed"})
+        self.assertEqual(check({"pnpm": "other failure"}, prebuilt_tui=True),
+                         {"pnpm": "other failure"})
+
     def test_accepts_actual_native_decoder_error_string(self):
         self.load_verify().require_native_patch_marker(b"_ERROR_FORMAT_BLOCK_SWITCH")
 

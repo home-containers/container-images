@@ -20,6 +20,13 @@ def require_native_patch_marker(marker: bytes | None) -> None:
     require(marker == b"_ERROR_FORMAT_BLOCK_SWITCH", "native decoder patch marker is missing")
 
 
+def unexpected_pm_drift(drift: dict, *, prebuilt_tui: bool) -> dict:
+    # v0.23.4 ships a prebuilt TUI and deliberately omits the build-only pnpm.
+    # Keep the full drift in the report and fail on every other finding.
+    return {name: detail for name, detail in drift.items()
+            if not (prebuilt_tui and name == "pnpm" and detail == "not installed or outdated")}
+
+
 def main() -> int:
     report: dict = {"python": sys.version.split()[0], "executable": sys.executable}
     try:
@@ -70,7 +77,10 @@ def main() -> int:
         sys.path.insert(0, str(root))
         from pm.install import drift
         report["pm_drift"] = drift()
-        require(not report["pm_drift"], "managed dependencies are out of sync with their locks")
+        tui_entry = root / "ui-tui/dist/entry.js"
+        prebuilt_tui = tui_entry.is_file() and tui_entry.stat().st_size > 0
+        report["unexpected_pm_drift"] = unexpected_pm_drift(report["pm_drift"], prebuilt_tui=prebuilt_tui)
+        require(not report["unexpected_pm_drift"], "managed dependencies are out of sync with their locks")
         report["status"] = "passed"
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
