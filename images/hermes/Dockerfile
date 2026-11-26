@@ -1,6 +1,6 @@
 # Derived image: preserve upstream's s6 entrypoint, command and privilege drop.
-# CI can override this with the resolved stable digest for an exact build input.
-ARG BASE_IMAGE=nousresearch/hermes-agent:stable
+# Upstream v0.23.4 multiarchitecture image (amd64 and arm64).
+ARG BASE_IMAGE=nousresearch/hermes-agent@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f
 FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE

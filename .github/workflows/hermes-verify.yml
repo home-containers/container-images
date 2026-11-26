@@ -24,7 +24,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      BASE_TAG: nousresearch/hermes-agent:stable
       TEST_IMAGE: hermes-security-overlay:ci
       TEST_CONTAINER: hermes-security-overlay-test
     steps:
@@ -36,16 +35,16 @@ jobs:
       - name: Test override logic without containers
         run: python3 -I -m unittest discover -s images/hermes/tests -p 'test_*.py' -v
 
-      - name: Resolve upstream stable to an immutable input
+      - name: Pull the reviewed upstream release digest
         shell: bash
         run: |
           set -euo pipefail
-          docker pull "$BASE_TAG"
-          pin="$(docker image inspect "$BASE_TAG" --format '{{index .RepoDigests 0}}')"
+          pin="$(awk -F= '/^ARG BASE_IMAGE=/ { print $2 }' images/hermes/Dockerfile)"
           if [[ ! "$pin" =~ ^nousresearch/hermes-agent@sha256:[0-9a-f]{64}$ ]]; then
             printf 'Unexpected upstream digest format: %s\n' "$pin" >&2
             exit 1
           fi
+          docker pull "$pin"
           printf 'BASE_PIN=%s\n' "$pin" >> "$GITHUB_ENV"
           printf 'Resolved upstream: %s\n' "$pin"
 

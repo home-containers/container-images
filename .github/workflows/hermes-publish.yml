@@ -2,6 +2,11 @@ name: Publish Hermes security overlay
 
 on:
   workflow_dispatch:
+    inputs:
+      promote_stable:
+        description: Also promote the tested image to stable
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -30,7 +35,6 @@ jobs:
     env:
       IMAGE: ghcr.io/home-containers/hermes
       ARCH: ${{ matrix.arch }}
-      BASE_TAG: nousresearch/hermes-agent:stable
       TEST_IMAGE: hermes-security-overlay:ci
       TEST_CONTAINER: hermes-security-overlay-test
     steps:
@@ -42,16 +46,16 @@ jobs:
       - name: Test override logic without containers
         run: python3 -I -m unittest discover -s images/hermes/tests -p 'test_*.py' -v
 
-      - name: Resolve upstream stable to an immutable input
+      - name: Pull the reviewed upstream release digest
         shell: bash
         run: |
           set -euo pipefail
-          docker pull "$BASE_TAG"
-          pin="$(docker image inspect "$BASE_TAG" --format '{{index .RepoDigests 0}}')"
+          pin="$(awk -F= '/^ARG BASE_IMAGE=/ { print $2 }' images/hermes/Dockerfile)"
           if [[ ! "$pin" =~ ^nousresearch/hermes-agent@sha256:[0-9a-f]{64}$ ]]; then
             printf 'Unexpected upstream digest format: %s\n' "$pin" >&2
             exit 1
           fi
+          docker pull "$pin"
           printf 'BASE_PIN=%s\n' "$pin" >> "$GITHUB_ENV"
           printf 'Resolved upstream: %s\n' "$pin"
 
@@ -71,6 +75,7 @@ jobs:
             --build-arg BASE_IMAGE="$BASE_PIN" \
             --label org.opencontainers.image.source=https://github.com/home-containers/container-images \
             --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.version=v0.23.4 \
             --tag "$TEST_IMAGE" images/hermes
 
       - name: Confirm upstream application and unrelated dependencies are unchanged
@@ -208,6 +213,8 @@ jobs:
           printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
       - name: Assemble, verify and tag the tested index
+        env:
+          PROMOTE_STABLE: ${{ inputs.promote_stable }}
         shell: bash
         run: |
           set -euo pipefail
@@ -216,13 +223,19 @@ jobs:
             "$IMAGE:${version}-arm64" "$IMAGE:${version}-amd64"
           docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' > index.json
           digest="$(python3 -I .github/scripts/verify_hermes_index.py < index.json)"
-          docker buildx imagetools create --tag "$IMAGE:stable" "$IMAGE@$digest"
-          docker buildx imagetools inspect "$IMAGE:stable" --format '{{json .Manifest}}' > stable.json
-          stable_digest="$(python3 -I .github/scripts/verify_hermes_index.py < stable.json)"
-          test "$stable_digest" = "$digest"
+          release_tag=v0.23.4
+          check_tag() {
+            docker buildx imagetools create --tag "$IMAGE:$1" "$IMAGE@$digest"
+            docker buildx imagetools inspect "$IMAGE:$1" --format '{{json .Manifest}}' > readback.json
+            test "$(python3 -I .github/scripts/verify_hermes_index.py < readback.json)" = "$digest"
+          }
+          check_tag "$release_tag"
+          if [[ "$PROMOTE_STABLE" == true ]]; then
+            check_tag stable
+          fi
           cat index.json
-          printf 'Published `%s:%s` and `%s:stable`\n\nDigest pin: `%s@%s`\n\nSource: `%s`\n' \
-            "$IMAGE" "$version" "$IMAGE" "$IMAGE" "$digest" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Published `%s:%s` and `%s:%s` (promote stable: %s)\n\nDigest pin: `%s@%s`\n\nSource: `%s`\n' \
+            "$IMAGE" "$version" "$IMAGE" "$release_tag" "$PROMOTE_STABLE" "$IMAGE" "$digest" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove registry login
         if: always()

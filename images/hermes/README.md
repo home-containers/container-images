@@ -1,6 +1,6 @@
 # Hermes security overlay
 
-Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Dockerfile, lock-coherent override helper, read-only image checks and manual GitHub Actions verification/publication workflows are implemented. Consult actual Actions and registry results before treating a revision as verified or published. No production deployment is configured.
+Debian-derived image based on **`nousresearch/hermes-agent:v0.23.4`**. The Dockerfile, lock-coherent override helper, read-only image checks and manual GitHub Actions verification/publication workflows are implemented. Consult actual Actions and registry results before treating a revision as verified or published. No production deployment is configured.
 
 ## What changes
 
@@ -12,7 +12,7 @@ Debian-derived image based on **`nousresearch/hermes-agent:stable`**. The Docker
 6. Replace **only the Brotli wheel in the existing `.venv`**, using bundled uv with `--no-deps`, `--require-hashes`, `--only-binary=:all:` and a package-scoped reinstall. This is an explicit downstream build-time exception because PM has no public API for a hash-enforced one-package in-place replacement. Update only the static Brotli dependency declaration and the PM selection stamp; preserve the shipped extras.
 7. Verify fixed decoders, HTTPX decoding, Node's patch marker and PM lock consistency. Compare SHA-256 inventories against the published base: application code, frontends, launchers, managed runtime files and unrelated installed dependencies must remain unchanged. Only the reviewed Brotli paths, dependency manifest/lock/declaration, selection facts and disposable caches/bytecode are excluded.
 
-**No upstream application rebuild:** the Dockerfile consumes the published `nousresearch/hermes-agent:stable` image. It does not fetch upstream `main`, recreate `.venv`, rebuild frontends or invoke the upstream assembler. A changed image layout or an override requiring broader changes must fail for review, not silently expand the build.
+**No upstream application rebuild:** the Dockerfile consumes the published `nousresearch/hermes-agent:v0.23.4` image. It does not fetch upstream `main`, recreate `.venv`, rebuild frontends or invoke the upstream assembler. A changed image layout or an override requiring broader changes must fail for review, not silently expand the build.
 
 ### The release-age policy
 
@@ -38,8 +38,8 @@ The Python dependency manifest and lock deliberately diverge for the security ov
 
 ## Build inputs
 
-- `BASE_IMAGE` defaults to `nousresearch/hermes-agent:stable`, as requested.
-- The verification workflow resolves that tag to a digest and passes the immutable reference into the build. A new run may intentionally resolve a newer stable image.
+- `BASE_IMAGE` defaults to the reviewed v0.23.4 multiarchitecture digest.
+- Both workflows use the immutable reference in the Dockerfile. Updating the upstream release requires updating that reference and the publisher’s release tag and version label.
 - `BROTLICFFI_VERSION` defaults to `1.2.1.0`; another exact fixed version requires review. Unsupported upstream manifest layouts, unrelated lock changes and newer pins that would be downgraded fail the build.
 - A closed `.dockerignore` sends only the Dockerfile and required build/check scripts, not runtime state or credentials.
 - Moving Debian repositories mean refreshed APT contents can differ between builds. The captured inventory records what was installed; a base digest alone does not make APT updates reproducible.
@@ -76,7 +76,8 @@ gh workflow run hermes-publish.yml --repo home-containers/container-images --ref
 Outputs:
 
 - `ghcr.io/home-containers/hermes:build-<run-id>-<attempt>` — unique build identifier; APT can change even for the same source commit.
-- `ghcr.io/home-containers/hermes:stable` — convenience tag promoted only after both native builds/tests and index validation pass.
+- `ghcr.io/home-containers/hermes:v0.23.4` — upstream-version tag for the tested overlay.
+- `ghcr.io/home-containers/hermes:stable` — optional convenience tag promoted only after both native builds/tests and index validation pass.
 - `ghcr.io/home-containers/hermes@sha256:<digest>` — immutable deployment reference, recorded in the Actions summary.
 
 Per-architecture build tags are retained for traceability. Publishing is not production deployment. Registry authentication/readback is verified by CI; public visibility and anonymous pulls must be checked separately. A newly created GHCR package can require a one-time **Package settings → Change visibility → Public** action by the account owner. No SBOM, signing, provenance attestation or comprehensive scan is claimed by this workflow.
