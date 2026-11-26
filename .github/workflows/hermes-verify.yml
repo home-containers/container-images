@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test override logic without containers
+      - name: Test inventory and verification logic without containers
         run: python3 -I -m unittest discover -s images/hermes/tests -p 'test_*.py' -v
 
       - name: Pull the reviewed upstream release digest
@@ -56,7 +56,7 @@ jobs:
             "$BASE_PIN" -B -I -S - --snapshot-only \
             < images/hermes/build_overlay.py > upstream-inventory.json
 
-      - name: Build the Debian and Python security overlay
+      - name: Build the Debian package refresh
         shell: bash
         run: |
           set -euo pipefail
@@ -64,7 +64,7 @@ jobs:
             --build-arg BASE_IMAGE="$BASE_PIN" \
             --tag "$TEST_IMAGE" images/hermes
 
-      - name: Confirm upstream application and unrelated dependencies are unchanged
+      - name: Confirm upstream application and dependencies are unchanged
         shell: bash
         run: |
           set -euo pipefail
